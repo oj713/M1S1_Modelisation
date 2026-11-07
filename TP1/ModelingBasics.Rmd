@@ -1,0 +1,225 @@
+---
+title: "ModelingBasics"
+output: html_document
+---
+
+## 2.1 modélisation de la décroissance de la radioactivité de l'uranium
+
+Intégration numérique à la main (méthode d'Euler)
+Chaque milliard d'années on perd une fraction alpha de la masse
+
+* Soit fonction exponentielle, soit calculer à chaque pas de temps
+
+```{r}
+alpha <- 0.143
+
+# parametres de temps
+t0 <- 0
+tf <- 12
+h <- 1
+temps <- seq(t0, tf, by=h)
+n <- length(temps)
+
+# tableau rempli de 0
+uranium <- rep(NA, times = n)
+uranium[1] <- 0.5
+```
+
+Solution Analytique
+```{r}
+U_analytic <- uranium[1]*exp(-alpha*temps)
+plot(temps, U_analytic, "l", main="Solution analytique")
+```
+
+Solution pas à pas
+```{r}
+for (i in 1:length(uranium)) {
+  if (i == 1) next;
+  uranium[i] <- (1 - alpha*h) * uranium[i-1]
+}
+
+plot(temps, uranium, "o", main="Décroissance exponentielle", col="blue")
+lines(temps, U_analytic, main="Solution analytique", col="red")
+legend(3, 0.5, legend=c("Intégration", "Solution analytique"), col=c("blue", "red"), lty=1)
+```
+Si `h=0.1`, moins de différence entre les deux
+
+## Partie 3: Modélisation de la dynamique d'une population de phoque
+
+```{r}
+# Donnees de suivi de la population de phoques
+annees <- c(1912,1914,1915,1918,1922,1923,1925,1932,1933,1937,1938,1945,1947,1950)
+phoques <- c(1000,1100,3000,4500,3000,3000,3000,8000,8000,11000,9000,10200,9000,9000)
+
+# Visualisation des donnees
+plot(annees,phoques)
+```
+Semble être croissance logistique - exponentielle puis attient d'un plateau. Estimer le taux de croissance dans la partie initiale de la courbe puis la capacité du milieu à la valeur max de la population
+
+Soit X l'effectif de la pop.
+dX/dt = rX(1-X/K)
+
+Valeur maximale de la population = 10000 = K
+Acroissement de 4000 individus/ 10 ans => r = 0.4
+
+```{r}
+t0 <- 0
+tf <- 40
+dt <- 0.1
+
+mon_temps <- seq(t0, tf, dt)
+
+nn <- length(mon_temps)
+mes_phoques <- rep(NA, times = nn)
+mes_phoques[1] <- 1000 # effectif pop à t=0
+
+K <- 10000
+
+simulationForR <- function (r) {
+  for (i in 2:length(mes_phoques)) {
+    prev <- mes_phoques[i-1]
+    dXdt <- r * prev * ( 1 - prev/K)
+    mes_phoques[i] <- prev + dXdt * dt
+  }
+  
+  plot(annees, phoques)
+  lines(mon_temps+1909, mes_phoques)
+  title(main=paste("Données et simulation avec r =", r))
+}
+
+simulationForR(0.2)
+```
+
+Répresente plutôt bien la dynamique mais accroissement trop rapide. 
+
+```{r}
+simulationForR(0.1)
+```
+
+## Partie 4: Croissance exponentielle d'une population
+
+```{r}
+t0 <- 0
+tf <- 50
+dt <- 1
+temps <- seq(t0, tf, dt)
+
+espece <- rep(NA, times = length(temps))
+espece[1] <- 67
+
+r <- .23
+
+for (i in 2:length(espece)) {
+  espece[i] <- espece[i-1] + r * espece[i-1]
+}
+
+plot(temps, espece, "o", main="Croissance exponentielle avec r=0.23")
+```
+## Partie 5: Intégration numérique avec la function *lsoda*
+
+Considère pop P avec taux de croissance linéaire. dP/dt = r*P
+
+* L'évolution de P en fonction du temps est proportionnelle à P
+* P(t) = c^(rt) 
+* Ou peut se calculer à partir des conditions initiales: P(0) = c^(r*0) = c
+
+```{r}
+suppressPackageStartupMessages({
+  library(deSolve)
+  library(ggplot2)
+  library(tidyverse)
+})
+
+model1 <- function(t, xx, param) {
+  P <- xx[1]
+  with(as.list(param), {
+    dP <- + r * P # dP/dt = r.P
+    list(c(dP)) # resultats mis sous forme de liste
+  })
+}
+
+# variables d'entrée
+t1 <- seq(0, 100, 1)
+par1 <- c(r=0.02) # taux de croissance, j^-1
+ini1 <- c(P=5) # P(0) = 5
+
+res1 <- as.data.frame(lsoda(ini1, t1, model1, par1))
+res1 |> head()
+```
+```{r}
+plot(res1$time, res1$P, 
+     type="l", 
+     xlab="Temps(j)",
+     ylab="Population (ind.)")
+```
+```{r}
+ggplot(res1, aes(x=time, y=P)) +
+  geom_line() +
+  labs(x="Temps(j)", y="Population (ind.)",
+       title="Croissance exponentielle d'une population (Cas r>0)")
+```
+* Si r < 0, décroissance exponentielle
+* Si r=0, population stable
+
+### Croissance logistique avec lsoda
+
+Pour rappel, le modèle de croissance logistique s’écrit : dP/dt = r.P-m.P.P = r.P.(1-r.P/m) = r.P.(1-P/k) avec le paramètre k = m/r.
+
+```{r}
+par2 <- c(r=0.02, k=10) #j-1, ind
+ini2 <- c(P=6) # unité: ind
+t2 <- seq(0, 500, 1) # unité: j
+
+model2 <- function(t, xx, param) {
+  P <- xx[1]
+  with(as.list(param), {
+    dP <- + r * P * (1-P/k) # dP/dt = r.P
+    list(c(dP)) # resultats mis sous forme de liste
+  })
+}
+
+plotLSoda <- function(ini, t, model, par, title) {
+  res <- as.data.frame(lsoda(ini, t, model, par))
+
+  print(ggplot(res, aes(x=time, y=P)) +
+    geom_line() +
+    labs(x="Temps(j)", y="Population (ind.)",
+         title=title))
+  
+  res
+}
+
+res2 <- plotLSoda(ini2, t2, model2, par2, 
+          "Croissance logistique d'une population (r=0.02, k=10) (cas P0<K)")
+```
+```{r}
+res3 <- plotLSoda(c(P=20), t2, model2, par2,
+          "Croissance logistique (p0 > K)")
+```
+```{r}
+res4 <- plotLSoda(c(P=2), t2, model2, par2,
+          "Croissance logistique (p0 << K)")
+```
+
+```{r}
+resall <- cbind(res2, res3$P, res4$P)
+colnames(resall) <- c("time", "cas1", "cas2", "cas3")
+
+resall <- resall |>
+  pivot_longer(!time, names_to="cas", values_to="P")
+
+ggplot(resall) +
+  geom_line(aes(x=time, y=P, color=cas)) +
+  labs(y="Population (ind)",x="Temps (j)",
+       title="Croissance logistique : comparaison selon la condition initiale",
+       color="Condition initiale")
+```
+
+```{r}
+# dans base R
+
+plot(res2$time, res2$P, type="l", col="red", xlab = "Temps (j)", ylab = "Population (ind.)", ylim=c(0,20))+
+lines(res3$time, res3$P, type="l", col="green")+
+lines(res4$time, res4$P, type="l", col="blue")
+```
+
