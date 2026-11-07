@@ -1,0 +1,330 @@
+---
+title: "TP2"
+output: html_document
+---
+
+### Question 5
+
+Utilisez ces formules et les données du tableau 1 pour calculer g2 et g2 avec R et compléter le tableau 2
+
+```{r}
+tortues <- data.frame(
+  stade = c("oeufs", "juveniles", "subadultes", "adultes"),
+  duree = c(1, 7, 14, 33), 
+  survie = c(0.6747, 0.7857, 0.7044, 0.8091),
+  fecondite = c(0, 0, 0, 79)
+)
+
+#' Calcule la probabilité de grandir dans la classe supérieure
+#' @param s, dbl, taux de survie dans cette classe
+#' @param d, int, durée de cette classe
+calcG <- function(s, d) {
+  if (s >= 1) { return(1) }
+  s**d * (1 - s) / ( 1 - s**d )
+}
+
+#' Calcule la probabilité de rester dans la classe actuelle
+#' @param s, dbl, taux de survie dans cette classe
+#' @param d, int, durée de cette classe
+calcR <- function(s, d) {
+  if (s >= 1) { return(1) }
+  s * ( 1 - s**(d-1) ) /( 1 - s**d )
+}
+
+gs <- mapply(calcG, tortues$survie, tortues$duree)
+rs <- mapply(calcR, tortues$survie, tortues$duree)
+
+M <- matrix(c(
+  0, 0, 0, tortues[4, "fecondite"], 
+  tortues[1, "survie"], rs[[2]], 0, 0,
+  0, gs[[2]], rs[[3]], 0,
+  0, 0, gs[[3]], rs[[4]]
+), 4, 4) |> t()
+
+# Matrice de transition pour la population de Caretta caretta basée sur les informations du tableau 1.
+M
+```
+## Dynamique de population
+
+Cette matrice de transition M nous permet de simuler la dynamique de la population au cours du temps. Nous partirons d’un état initial avec 10 individus dans chaque classe, représenté sous forme d’un vecteur colonne N0. Le calcul de l’état suivant de la population se fait par une simple multiplication matricielle M×N0. Pour une population théorique, à 3 classes d’ages, le calcul de l’état après un an se ferait ainsi:
+
+```{r}
+M3 <- matrix(c(0  , 0  , 5   ,
+               0.3, 0.6, 0   ,
+               0  , 0.1, 0.7),
+             ncol=3, byrow=TRUE)
+N0 <- matrix(c(10, 10, 10), ncol=1)
+N1 <- M3 %*% N0
+# NB: %*% est l'opérateur de multiplication matricielle
+#     par opposition à la multiplication élément par élément.
+N1
+```
+L’intégration sur 20 ans, avec un pas d’un an, se ferait ainsi (avec la méthode d’Euler):
+
+```{r}
+# Vecteur de temps
+ti <- 0
+tf <- 20
+dt <- 1
+t <- seq(from=ti, to=tf, by=dt)
+# Nombre de pas de temps
+nt <- length(t)  # = longueur du vecteur temps
+
+# Matrice vide pour le stockage des abondances au cours du temps
+N <- matrix(NA, nrow=3, ncol=nt)
+# Insérer l'état initial
+N0 <- c(10, 10, 10)
+N[,1] <- N0
+
+# Boucle sur le temps
+# = Calcul des abondances au temps t+1 à partir du temps t
+#   Il faut donc s'arrêter au pas de temps nt-1 !
+for (i in 1:(nt-1)) {
+  N[,i+1] <- M3 %*% N[,i]
+}
+
+# Représentation graphique
+# NB: il faut transposer la matrice N pour que le plot se fasse dans le bon sens
+matplot(t, t(N))
+```
+
+```{r}
+# Pour rendre le plot un peu plus élégant on peut
+# - tracer des lignes: type="l"
+# - les rendre continues: lty=1
+# - choisir de plus jolies couleurs: col=2:4
+# - ajouter une légende qui correspond
+matplot(t, t(N), type="l", lty=1, col=2:4)
+legend("topleft", c("classe 1", "classe 2", "classe 3"), lty = 1, col=2:4)
+```
+### Question 6
+
+Utilisez ce code comme exemple, adaptez-le à votre population et calculez les valeurs d’abondance de C. caretta au temps 1 (sous forme numérique) puis sur 20 ans (sous forme d’un graphique).
+
+Nous partirons d’un état initial avec 10 individus dans chaque classe.
+```{r}
+# Vecteur de temps
+ti <- 0
+tf <- 20
+dt <- 1
+t <- seq(from=ti, to=tf, by=dt)
+# Nombre de pas de temps
+nt <- length(t)  # = longueur du vecteur temps
+
+# Matrice vide pour le stockage des abondances au cours du temps
+N <- matrix(NA, nrow=4, ncol=nt)
+# l'état initial
+N[,1] <- rep(10, 4)
+
+N[,1]
+```
+
+
+```{r}
+# Boucle sur le temps
+# = Calcul des abondances au temps t+1 à partir du temps t
+#   Il faut donc s'arrêter au pas de temps nt-1 !
+for (i in 1:(nt-1)) {
+  N[,i+1] <- M %*% N[,i]
+}
+
+# répresentation graphique
+matplot(t, t(N), type="l", lty=1, col=2:5, xlab="Temps (ans)", ylab="Individus")
+legend("topright", tortues$stade, lty = 1, col=2:5)
+```
+
+### Question 7
+
+Question 7: La fonction eigen() donne les valeurs et vecteurs propres de la matrice de transition. Cela permet d’identifier λ, la valeur propre réelle dominante = le taux de croissance de la population, ainsi que le vecteur propre associé = les proportions dans chaque classe à l’état asymptotique.
+
+```{r}
+# Vecteurs et valeurs propres
+eig <- eigen(M3)
+e <- eig$values
+e
+
+# Valeur propre dominante
+lambda <- max(Mod(e))
+# NB: les valeurs propres peuvent être des nombres complexes conjugées; Mod() 
+#     permet d'en prendre le module, c'est à dire l'intensité/la valeur
+lambda
+
+# Vecteur propre correspondant
+imax <- which.max(Mod(e))
+V <- eig$vectors[, imax]
+V
+```
+
+Nous n’aurions donc même pas eu besoin de simuler la dynamique temporelle pour savoir qu’il y aurait, à terme, plus de la classe 1 que des deux autres (0.811 > 0.56 et 0.167).
+
+Utilisez `eigen()` pour calculer λ et l’état asymptotique de la population de tortues. La population est-elle en croissance? Quelle classe est dominante? Cela correspond-il à vos simulations sur 20 ans?
+
+```{r}
+# Vecteurs et valeurs propres
+eig <- eigen(M)
+e <- eig$values
+e
+
+# Valeur propre dominante
+lambda <- max(Mod(e))
+# NB: les valeurs propres peuvent être des nombres complexes conjugées; Mod() 
+#     permet d'en prendre le module, c'est à dire l'intensité/la valeur
+lambda
+
+# Vecteur propre correspondant
+imax <- which.max(Mod(e))
+V <- eig$vectors[, imax]
+V
+```
+
+La classe dominante est celle des juveniles, mais vu que le lambda est moins qu'un la population est en décroissance. C'est consistent avec mes simulations sur 20 ans.
+
+## 3. Analyse de sensibilité
+
+Pour savoir quelle portion du cycle de vie influence le plus la dynamique de la population dans son ensemble, nous allons calculer la variation de λ en fonction de la variation des différents paramètres du tableau 1 (survie des différents stades et fécondité). Plutôt que la sensibilité, nous allons calculer l’élasticité. 
+
+Nous allons varier chaque paramètre de 10% donc $dm_{ij}/m_{ij}=0.1 \forall m_{ij}$. Par contre, le calcul de $\lambda$ dépend de $M$ qui dépend des $r_i$ et $g_i$ qui dépendent eux-mêmes des paramètres du tableau 1. Pour faciliter le calcul, nous allons utiliser des fonctions qui calculent $r_i$, $g_i$ et $M$. Ces fonctions sont ci-dessous. Copiez-collez les dans la console de R pour les définir (elles apparaitrons dans votre environnement).
+
+```{r}
+#' Calcule de la matrice de transformation pour les tortues avec stade de vie et durée des stades fixes
+#' @param newS vecteur dbl, taux de survive pour chaque stade
+#' @param f4 dbl, taux de fecondité pour le stade 4
+calcule_tortue_M <- function(newS, f4) {
+  if ( length(newS) != 4 || any(newS < 0) || f4 < 0 ) { stop("Invalid parameters") }
+  gs <- mapply(calcG, newS, tortues$duree)
+  rs <- mapply(calcR, newS, tortues$duree)
+
+  matrix(c(
+    0, 0, 0, f4, 
+    gs[[1]], rs[[2]], 0, 0,
+    0, gs[[2]], rs[[3]], 0,
+    0, 0, gs[[3]], rs[[4]]
+  ), nrow = 4, byrow = TRUE)
+}
+
+# Verifier que le résultat est la même que celui d'avant
+calcule_tortue_M(tortues$survie, tortues[4, "fecondite"])
+```
+### Question 8
+
+Re-calculez M et λ avec la fonction en utilisant exactement les valeurs des paramètres du tableau 1, de façon à vérifier que vous retrouvez les mêmes résultats que ceux du tableau 2 et des questions précédentes. Ensuite, calculez les nouvelles valeurs de λ puis les élasticités associées à une augmentation de 10% de la survie du stade 1 ou du stade 4, de façon à comparer la stratégie de conservation actuelle focalisée sur les œufs et les nouveaux nés à une stratégie focalisée sur les adultes reproducteurs. Quelle est la meilleure stratégie?
+
+```{r}
+library(purrr)
+
+calcLambda <- function(M) {
+  eig <- eigen(M)
+  e <- eig$values
+
+  max(Mod(e))
+}
+
+taux_change <- 1.10
+
+stades_a_tester <- c("Stade 1" = 1, "Stade 4" = 4)
+
+resultats <- stades_a_tester |> map(function(stade) {
+  newS <- tortues$survie
+  newS[[stade]] <- newS[[stade]] * taux_change
+  
+  newLambda <- calcule_tortue_M(newS, tortues[4, "fecondite"]) |> calcLambda()
+  elasticite <- (newLambda/lambda)/taux_change
+  
+  return (c("lambda" = newLambda, "elasticite" = elasticite))
+})
+
+resultats
+```
+La meilleure stratégie est de se focaliser sur la conservation des adultes. $\lambda$ et l'élasticité sont tous les deux plus élévé pour le stade 4, ce qui correspond à une plus grande taux de survie et une rélative augmentation par rapport aux paramètres originels, respectivement.
+
+### Question 9
+
+Comparez maintenant une augmentation de 10% de la fécondité des stades 4 à une augmentation de 10% de leur survie. Là encore, cela reflète la stratégie actuelle qui consiste à protéger les femelles lorsqu’elles se reproduisent sur les plages à une stratégie d’avantage tournée sur le reste de leur temps de vie. Quelle est la meilleure stratégie?
+
+```{r}
+lambda_fecondite <- calcule_tortue_M(tortues$survie, tortues[4, "fecondite"] * taux_change) |> calcLambda()
+elasticite_fecondite <- (lambda_fecondite/lambda)/taux_change
+
+resultats$Fecondite <- c("lambda" = lambda_fecondite, "elasticite" = elasticite_fecondite)
+
+resultats
+```
+Les stratégies sont identiques en termes d'efficacité. Dans le formalisme du système, la seule contribution des adultes est la production des oeufs, alors les deux stratégies ont l'effet identique d'augmenter la production des oeufs par 10% (soit par l'augmentation des individus, soit par l'augmentation de la population totale).
+
+### Question 10
+
+Les filets de pêche à la crevette capturent accidentellement des stades juvéniles (stades 2) de tortues. Des Turtle Excluder Devices (TEDs) peuvent être installés sur les filets, qui empêchent le passage d’animaux trop gros dans le filet. Ils protègent efficacement les stades 2, des captures accidentelles.
+
+Par essai-erreur, calculez de quel pourcentage (approximativement) il faudrait augmenter la survie des stades 2 en déployant ce genre d’engin pour que la population de tortues retrouve une dynamique stable ou de croissance.
+
+
+```{r}
+suppressPackageStartupMessages({
+  library(tibble)
+  library(ggplot2)
+})
+
+found_stable <- FALSE
+
+result_table <- data.frame("pourcentage" = c(0), "lambda" = c(lambda), "elasticite" = c(1))
+
+delta <- 0.01
+pourcent_augmentation <- delta
+
+while (!found_stable) {
+  newS <- tortues$survie
+  newS[[2]] <- newS[[2]] * (1 + pourcent_augmentation)
+  
+  newLambda <- calcule_tortue_M(newS, tortues[4, "fecondite"]) |> calcLambda()
+  elasticite <- (newLambda/lambda)/(1 + pourcent_augmentation)
+  
+  result_table <- result_table |> add_row(
+    pourcentage = pourcent_augmentation, 
+    lambda = newLambda, 
+    elasticite = elasticite
+  )
+  
+  pourcent_augmentation <- pourcent_augmentation + delta
+  if (newLambda >= 1) { found_stable = TRUE }
+}
+
+result_table[nrow(result_table),]
+```
+
+```{r}
+ggplot(result_table, aes(x = pourcentage)) + 
+  geom_line(aes(y = lambda), col = "blue") + 
+  geom_line(aes(y = elasticite), col = "orange") + 
+  geom_hline(yintercept = 1, col = "red", linetype = "dashed") + 
+  labs(y = "Lambda dominant", x = "Pourcentage d'augmentation de taux de survie de stade 2") +
+  theme_bw()
+```
+
+Il faut augmenter le taux de survie des individus de stade 2 par 15% pour atteindre une population stable.
+
+### Question 11
+
+Quelle que soit la mesure de gestion prise, les taux de survie ne pourront jamais dépasser 1. Une autre façon de voir quel stade serait une cible de gestion efficace est de simuler le cas où si=1 pour chaque i .
+
+Fixez successivement chaque taux de survie à 1 et calculez λ. Quels sont les stades les plus appropriés comme cibles de gestion? Quelle stratégie de conservation, parmi les scenarii testés ci-dessus ou d’autres que vous pourriez imaginer ou trouver, vous semble la plus pertinente pour cette population?
+
+```{r}
+stades_a_tester <- 1:4
+names(stades_a_tester) <- 1:4 |> sapply(\(x) paste("Stade", x))
+
+resultats <- stades_a_tester |> map(function(stade) {
+  newS <- tortues$survie
+  newS[[stade]] <- 1
+  
+  newLambda <- calcule_tortue_M(newS, tortues[4, "fecondite"]) |> calcLambda()
+  
+  newLambda
+})
+
+resultats
+```
+Le stade avec la change de tendance de croissance la plus élévée est le stade 3, avec un nouveau lambda de 1.95. Le stade 2 montre aussi un lambda élévé. Ces résultats suggèrent que la méthode de conservation la plus éfficace serait de conserver les individus juveniles et sub-adultes. Les Turtle Excluder Devices seraient une méthode éfficace de protéger les individus de stade 2. À moins que l'on sache les causes de mortalité des sub-adultes, c'est difficile de prescrire des solutions pour leur conservation, mais c'est fortement probable que les mésures contre la pêche accidentale et la pollution seraient efficaces.
+
+
+
+
