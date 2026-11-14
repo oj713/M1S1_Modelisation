@@ -1,0 +1,338 @@
+---
+title: "TP3 Modélo"
+output: 
+  html_document:
+    toc: TRUE
+---
+
+Cette séance vous permettra de simuler la dynamique proie-prédateur entre du phytoplancton (que l’on notera “P”) et du zooplankton (que l’on notera “Z”). Nous implémenterons des modèles de type Lotka-Volterra avec R sous RStudio. Nous utiliserons plusieurs méthodes d’intégration numérique (= plusieurs manières de résoudre les équations du modèle), soit avec l’intégration d’Euler, soit avec la fonction lsoda, ensuivant ce que nous avions déjà fait lors du premier TP. Cette fois, il n’y aura plus une seule variable (et donc une seule équation à résoudre), mais deux variables en intéraction : les variations de l’une dépendront des valeurs de l’autre, et réciproquement. Il y a aura donc 2 équations à résoudre simultanément. On parle de “système d’équations”.
+
+# 1. Simuler le modèle de Lotka-Volterra
+
+Nous allons ainsi simuler la dynamique d’une population de proie (P) et d’une population de prédateur (Z) suivant le modèle de Lotka-Volterra : - Dynamique de la proie P : dP/dt = + r.P - a.P.Z - Dynamique du prédateur Z : dZ/dt = + e.a.P.Z - m.Z
+
+La proie P a une croissance exponentielle (taux de croissance : r) mais est consommée par un prédateur Z (relation linéaire, taux de prédation : a). Quant au prédateur, il croit grâce à la prédation de manière linéaire (efficacité de la croissance par prédation : e) et a une mortalité linaire (taux de mortalité : m).
+
+## Définition des paramètres et de plusieurs tableaux
+
+```{r}
+# Defining the model parameters
+r <- 0.5  # growth rate of the phytoplankton (d-1)
+a <- 0.1  # predation rate of the zooplankton feeding on phytoplankton (d-1m3gC-1)
+e <- 0.9  # efficiency of the predation (unitless)
+m <- 0.5  # mortality rate of zooplankton (d-1)
+
+# Declaring the model time steps
+
+t0 <- 0   #initial time
+dt <- 0.01 # time step
+tf <- 40  #final time
+times <- seq(from=t0, to=tf, by=dt) # time vector
+n <- length(times) # size of the time vector: we will use C later
+
+paste("Length of times:", n)
+
+# Declaring the vector for the concentrations of phyto and zoo
+mespop <- matrix(0, nrow = 2, ncol = n)
+
+# Declaring the initial values for the phyto and the zoo
+mespop[1,1] <- 12  # Initial density of phytoplankton (gC/m3)
+mespop[2,1] <- 6   # Initial density of zooplankton (gC/m3)
+```
+
+Nous allons maintenant écrire les équations du modèles puis les résoudre, d’abord avec la méthode d’Euler, ensuite grâce à la fonction lsoda.
+
+## Option 1: Intégration numérique selon la méthode d'Euler
+
+Commençons par appliquer la méthode d’Euler, à la main, pour remplir le tableau qui contient les concentrations en phyto et en zoo au fur et à mesure de chaque pas de temps. Pour ça, on utilise une boucle “pour”.
+
+```{r}
+for (i in 2:n) {
+  P_prev <- mespop[1, i-1]
+  Z_prev <- mespop[2, i-1]
+  # Populating phytoplankton. P(t) = P(t-1) + dt * dP/dt
+  mespop[1, i] = P_prev + dt * (P_prev * r - a * P_prev * Z_prev)
+  # Populating zooplankton. Z(t) = Z(t-1) + dt * dZ/dt
+  mespop[2, i] = Z_prev + dt * (e * a * P_prev * Z_prev - m * Z_prev)
+}
+```
+```{r}
+plot(x = times, y = mespop[1,], type = "l", col = "green", 
+     xlab = "Time (années)", ylab = "Populations (concentrations)", main = "Simulation proie-prédateur")
+lines(x = times, y = mespop[2,], col = "red")
+legend("topright", c("Phytoplancton", "Zooplancton"), lty = 1, col=c("green", "red"))
+```
+```{r}
+plot(x = mespop[1,], y = mespop[2,], type = "l", col = "black", 
+     xlab = "Phyto", ylab = "Zoo", main = "Portrait de phase")
+```
+*The abundance of phyto/zoo follow a cyclical pattern, where a spike in phytoplancton is followed by a spike in zooplankton, which then causes the phytoplankton to decrease, causing the zooplankton to decrease…*
+
+*The circle here is not perfect. This is due to the differing coefficients between the Phytoplancton and zooplankton, notably the efficiency parameter. Because of the energetic transfer the amplitude of zooplankton is forcibly diminished relative to phytoplankton.*
+
+*We can also note with the circle that it is not a perfect circle, it is rather a slight spiral form. This is due to the inherent error of euler integration. We can avoid the error by using continuous integration or reducing our delta t*
+
+## Option 2: Fonction *lsoda*
+
+Vous allez maintenant implémenter le même modèle mais cette fois en utilisant la fonction lsoda du package *deSolve*.
+
+```{r}
+suppressPackageStartupMessages({
+  library(deSolve)
+  library(ggpubr)
+  library(tidyr)
+})
+
+parms <- c("r" = r, "a" = a, "e" = e, "m" = m)
+
+PZmod <- function(t, x, parms) {
+  with(as.list(c(parms, x)), {
+    dP <- r*P - a*P*Z
+    dZ <- e*a*P*Z - m*Z
+    res <- c(dP, dZ)
+    list(res)
+  })
+}
+
+xstart <- c(P = 12, Z = 6)
+
+out <- lsoda(xstart, times, PZmod, parms)
+
+#' Returns side-by-side proie-prédateur simulation and phase portrait for an lsoda result.
+#' @param lsoda_out matrix, lsoda output
+#' @param title string, the title for the simulation half of the plot
+#' @returns plot
+lsoda_plot <- function(lsoda_out, title) {
+  
+  lsoda_plottable <- lsoda_out |> 
+    data.frame() |> 
+    pivot_longer(
+      P:Z, 
+      names_to = "species", 
+      values_to = "effectif"
+    )
+  
+  # Plot 1: Simulation prey-predator as a function of time
+  sim <- ggplot(lsoda_plottable, aes( x = time, y = effectif, col = species)) +
+    geom_line() + 
+    labs(x = "Temps", y = "Effectif", col = "Species", title = title) +  
+    theme_bw() + 
+    theme(legend.position = "bottom") 
+  
+  # Plot 2: Phase portrait
+  phase <- ggplot(lsoda_out, aes(x=P, y=Z)) +
+    geom_point(cex=0.5) +
+    labs(x = "Effectif de P", y = "Effectif de Z", title = "Portrait de phase") + 
+    theme_bw()
+  
+  ggpubr::ggarrange(sim, phase, ncol=2)
+}
+
+lsoda_plot(out, "Simulation proie-prédateur")
+```
+
+*We can see here in the portrait of the phase diagram that it is a perfect circle rather than spiraling. This suggests that the euler method does not recognize the perfect cyclicity of the cycle and over time will no longer be a good representation. We can also conclude that this model is at equilibrium and will not change.*
+
+# Exercise 2: Simuler le modèle de Lotka-Volterra avec une croissance logistique pour la proie
+
+```{r}
+parms_log <- c("r" = 0.5, "k"=20, "a" = .1, "e" = .9, "m" = .5)
+
+PZmod_logistique <- function(t, x, parms) {
+  with(as.list(c(parms, x)), {
+    # Croissance logistic rP(1-P/k), ou k = capacité limité
+    dP <- r*P*(1 - P/k) - a*Z*P
+    dZ <- e*a*P*Z - m*Z
+    res <- c(dP, dZ)
+    list(res)
+  })
+}
+
+out_log <- lsoda(xstart, times, PZmod_logistique, parms_log)
+
+lsoda_plot(out_log, "Simulation Logistique")
+```
+*The amplitude of variation of the two populations slowly diminishes over time and seems to be heading towards a stable equilibrium with both populations constant at a single value. The spiral also shows this, as the variations of Z and P slowly diminish and converge at roughly (5.5, 3.75).*
+
+# 3. Simuler le modèle de Lotka-Volterra avec une saturation de la prédation
+
+Dans le modèle de Lotka-Volterra de base, toutes les relations sont linéaires. Or ce n’est pas très réalise d’avoir de la prédation linéaire, car plus le prédateur mange plus il est rassasié. A votre avis comment pourrions-nous le représenter ? Par quoi faudrait-il remplacer cette relation linéaire ? Souvenez-vous des réponses fonctionnelles proposées par Holling. Que choisiriez-vous ?
+
+*Il faut remplacer la relation avec une réponse qui réflètement une diminution quand le prédateur est rassassie, i.e. la densité des proies est élévée. La réponse fonctionnelle 2 (Monod/Hyperbolique) est la meilleur choix parce qu'il répresente un usage densité-dépendante.*
+
+```{r}
+parms_satpop <- c("r" = 0.5, "k"=20, "a" = .1, "e" = .9, "m" = .5)
+
+PZmod_satpop <- function(t, x, parms) {
+  with(as.list(c(parms, x)), {
+    # type 2 response P/(k + P)
+    dP <- r*P - e*a*(P/(k + P))*Z
+    dZ <- e*a*(P/(k + P))*Z - m*Z
+    res <- c(dP, dZ)
+    list(res)
+  })
+}
+
+out_satpop <- lsoda(xstart, times, PZmod_satpop, parms_satpop)
+
+lsoda_plot(out_satpop, "Simulation avec Saturation")
+```
+
+Le zooplancton devient effectivement zéro et le phytoplancton augment à la croissance exponentielle Je ne trouve pas ça réaliste, le phytoplancton devrait être limité lui aussi.
+
+# 4. Simuler le modèle de Lotka Volterra avec un mortalité densité dépendante pour le prédateur
+
+Dans le modèle de Lotka-Volterra de base, toutes les relations sont linéaires. Or ce n’est pas très réalise d’avoir de la mortalité linéaire, car plus il y a de prédateurs, plus sa mortalité augmente. On parle de mortalité densité-dépendante. Comment représsenter ça dans le modèle ?
+
+*On remplace le paramètre linéaire de mortalité de zooplankton avec le facteur densité-dépendant m(Z^2)*
+
+```{r}
+parms_mordens <- c("r" = 0.5, "c" = 0.5, "a" = .1, "e" = .9, "m" = .5)
+
+PZmod_mordens <- function(t, x, parms) {
+  with(as.list(c(parms, x)), {
+    dP <- r*P - a*P*Z
+    # Altered mortality, replacement with m(Z^2)
+    dZ <- e*a*P*Z - m*(Z**2)
+    res <- c(dP, dZ)
+    list(res)
+  })
+}
+
+out_mordens <- lsoda(xstart, times, PZmod_mordens, parms)
+
+lsoda_plot(out_mordens, "Mortalité Densité")
+```
+
+*We observe a stable equilibrium, where the z pop stabilizes very quickly while the p population also stabilizes at a higher value. No oscillation to be found.*
+
+# 4b. Simuler le modèle de Lotka-Volterra avec une saturation de la prédation
+
+Et si m vaut 0.3, qu’obtenez-vous ? Quel est le type d’équilibre ?
+
+```{r}
+parms_mordens_m3 <- c("r" = 0.5, "a" = .1, "e" = .9, "m" = .3)
+
+out_log <- lsoda(xstart, times, PZmod_mordens, parms_mordens_m3)
+
+lsoda_plot(out_log, "Mortalité Densité (m = 0.3)")
+```
+
+*The reduction of mortality slightly increases the capacity for zooplankton and reduces the capacity for phytoplankton. It remains a stable equilibrium.*
+
+# 5. Simuler le modèle de Lotka-Volterra avec 3 niveaux trophiques 
+
+Nous allons maintenant un peu changer les valeurs des paramètres et voir le comportement du modèle change.
+
+```{r}
+#' Returns proie-prédateur simulation and phase portraits for an lsoda result for P, Z, and Fi.
+#' @param lsoda_out matrix, lsoda output
+#' @param title string, the title for the simulation plot
+#' @returns list of plots
+lsoda_plot_pzf <- function(lsoda_out, title) {
+  
+  lsoda_plottable <- lsoda_out |> 
+    data.frame() |> 
+    pivot_longer(
+      P:Fi, # change to select from P to Fi rather than P to Z
+      names_to = "species", 
+      values_to = "effectif"
+    )
+  
+  # Plot 1: Simulation prey-predator as a function of time
+  # No change !
+  simulation <- ggplot(lsoda_plottable, 
+                aes(
+                  x = time, 
+                  y = effectif, 
+                  col = species) 
+                ) +
+    geom_line() + 
+    labs(x = "Temps", y = "Effectif", col = "Species", 
+         title = title) +  
+    theme_bw() + 
+    theme(legend.position = "bottom") 
+  
+  # Plot 2: Phase portrait of Phytoplankton vs. Zooplankton
+  # Also no change !
+  phasePZ <- ggplot(lsoda_out, 
+                  aes(
+                    x = P, 
+                    y = Z) 
+                  ) +
+    geom_point(cex=0.5) + 
+    labs(x = "Effectif de P", y = "Effectif de Z", title = "Portrait de phase") + 
+    theme_bw()
+  
+  # Plot 3: Phase portrait of Zooplankton vs. Fish (New)
+  # basically the same as plot 2, we just change the axes a bit
+  phaseZFi <- ggplot(lsoda_out, 
+                  aes(
+                    x = Z, 
+                    y = Fi) 
+                  ) +
+    geom_point(cex=0.5) + 
+    labs(x = "Effectif de Z", y = "Effectif de Fi", title = "Portrait de phase") + 
+    theme_bw()
+  
+  # With 3 plots, arranging them side by side would be hard to read
+  # I'm instead just going to return a list of all the plots
+  # giving them names is entirely optional
+  c("Simulation" = simulation, "PhasePZ" = phasePZ, "PhaseZFi" = phaseZFi)
+}
+```
+
+
+```{r}
+parms_pzf <- c("r" = .7, "az" = 0.35, "af" = 0.3, "ez" = 0.5, "ef" = 0.8, "m" = 0.4)
+
+PZFimod <- function(t, x, parms) {
+  with(as.list(c(parms, x)), {
+    dP <- r*P - az*P*Z
+    dZ <- ez*az*P*Z - af*Z*Fi
+    dFi <- ef*af*Z*Fi - m*Fi
+    res <- c(dP, dZ, dFi)
+    list(res)
+  })
+}
+
+xstart_pzf <- c(P = 12, Z = 6, Fi = 3)
+
+out_pzf <- lsoda(xstart_pzf, times, PZFimod, parms_pzf)
+
+# test it out
+lsoda_plot_pzf(out_pzf, "Simulation PZF")
+```
+
+*We remark that all three species oscillate together with increasing amplitude over time. This model is not stable and seems to not be at equilibrium but rather spiraling out of control.*
+
+## Et que se passe-t-il pour une mortalité quadratique des poissons ?
+
+```{r}
+PZFimod_quad <- function(t, x, parms) {
+  with(as.list(c(parms, x)), {
+    dP <- r*P - az*P*Z
+    dZ <- ez*az*P*Z - af*Z*Fi
+    dFi <- ef*af*Z*Fi - m*(Fi^2) # quadratic mortality
+    res <- c(dP, dZ, dFi)
+    list(res)
+  })
+}
+
+out_pzf_quad <- lsoda(xstart_pzf, times, PZFimod_quad, parms_pzf)
+
+plot_res <- lsoda_plot_pzf(out_pzf_quad, "Simulation PZF - Mortalité quadratique")
+# i only wanna see the simulation plot
+plot_res$Simulation
+```
+
+*Avec une mortalité quadratique, l'equilibre stable se retrouve!*
+
+
+
+
+
+
+
+
+

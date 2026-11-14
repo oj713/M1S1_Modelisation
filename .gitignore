@@ -3,7 +3,7 @@
 .Rapp.history
 
 .DStore
-*.html
+*[!aide].html
 
 # Session Data files
 .RData
