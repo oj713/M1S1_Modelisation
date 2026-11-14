@@ -213,37 +213,37 @@ Re-calculez M et λ avec la fonction en utilisant exactement les valeurs des par
 library(purrr)
 
 calcLambda <- function(M) {
-  eig <- eigen(M)
-  e <- eig$values
-
-  max(Mod(e))
+  eigen(M)$values |>
+    Mod() |>
+    max()
 }
 
-taux_change <- 1.10
+taux_change <- 0.10
 
 stades_a_tester <- c("Stade 1" = 1, "Stade 4" = 4)
 
 resultats <- stades_a_tester |> map(function(stade) {
   newS <- tortues$survie
-  newS[[stade]] <- newS[[stade]] * taux_change
+  newS[[stade]] <- newS[[stade]] * (1 + taux_change)
   
   newLambda <- calcule_tortue_M(newS, tortues[4, "fecondite"]) |> calcLambda()
-  elasticite <- (newLambda/lambda)/taux_change
+  # delta lambda/lambda over delta m_ij / m_ij
+  elasticite <- (newLambda - lambda)/(lambda * taux_change)
   
   return (c("lambda" = newLambda, "elasticite" = elasticite))
 })
 
 resultats
 ```
-La meilleure stratégie est de se focaliser sur la conservation des adultes. $\lambda$ et l'élasticité sont tous les deux plus élévé pour le stade 4, ce qui correspond à une plus grande taux de survie et une rélative augmentation par rapport aux paramètres originels, respectivement.
+La meilleure stratégie est de se focaliser sur la conservation des adultes. l'élasticité est beaucoup plus élévée pour le stade 4, ce qui correspond à une plus grande taux de survie et une rélative augmentation par rapport aux paramètres originels, respectivement.
 
 ### Question 9
 
 Comparez maintenant une augmentation de 10% de la fécondité des stades 4 à une augmentation de 10% de leur survie. Là encore, cela reflète la stratégie actuelle qui consiste à protéger les femelles lorsqu’elles se reproduisent sur les plages à une stratégie d’avantage tournée sur le reste de leur temps de vie. Quelle est la meilleure stratégie?
 
 ```{r}
-lambda_fecondite <- calcule_tortue_M(tortues$survie, tortues[4, "fecondite"] * taux_change) |> calcLambda()
-elasticite_fecondite <- (lambda_fecondite/lambda)/taux_change
+lambda_fecondite <- calcule_tortue_M(tortues$survie, tortues[4, "fecondite"] * (1 + taux_change)) |> calcLambda()
+elasticite_fecondite <- (lambda_fecondite-lambda)/(lambda*taux_change)
 
 resultats$Fecondite <- c("lambda" = lambda_fecondite, "elasticite" = elasticite_fecondite)
 
@@ -276,7 +276,7 @@ while (!found_stable) {
   newS[[2]] <- newS[[2]] * (1 + pourcent_augmentation)
   
   newLambda <- calcule_tortue_M(newS, tortues[4, "fecondite"]) |> calcLambda()
-  elasticite <- (newLambda/lambda)/(1 + pourcent_augmentation)
+  elasticite <- (newLambda - lambda)/(lambda*pourcent_augmentation)
   
   result_table <- result_table |> add_row(
     pourcentage = pourcent_augmentation, 
